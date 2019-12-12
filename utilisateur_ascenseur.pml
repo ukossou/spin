@@ -23,7 +23,8 @@ Les declarations
 Les varialbes
 ----------------------------------------------------------------------------------------*/
 mtype = {//todo: mettre de l'ordre
-	SIGNAL_PRESENCE, UTILISATEUR_INTERIEUR_ASCENSEUR, // presence de l'utilisateur
+	SIGNAL_UTIL_DANS_ASC, // l'utilisateur est dans l'ascenseur
+	SIGNAL_PRESENCE,
 	SIGNAL_OUVRIR_PORTES, SIGNAL_PORTES_OUVERTES, // etats des portes de l'ascenseur
 	SIGNAL_FERMER_PORTES, SIGNAL_PORTES_FERMEES,  // commandes des portes de l'ascenseur
 	SIGNAL_TIMER_INIT, SIGNAL_TIMEOUT, SIGNAL_APPEL_ASC, // etc ... etc
@@ -90,8 +91,7 @@ active proctype Controleur() {
 		:: nempty(chCommandeAsc) -> //attendre la confirmation que l'ascenseur a fini	 
 									do
 										:: (etage == etageCourantAsc) && (etatPorteAsc == ouverte) -> 
-											printf("Ascenseur arrive %e", etage);
-											empty(chCommandeAsc);
+											printf("Ascenseur arrive %e \n", etage);
 											chAppelAscenseur??etage , sens //???
 											break
 
@@ -110,7 +110,7 @@ active proctype Ascenseur() {
 	mtype:sensDepl sens;
 
 	do //simplifier la lecture dans le canal
-		::chCommandeAsc?<etage , sens>; etageCourantAsc = etage; etatPorteAsc = ouverte;
+		::chCommandeAsc?etage , sens; etageCourantAsc = etage; etatPorteAsc = ouverte;
 	od
 
 };
@@ -128,11 +128,11 @@ proctype Utilisateur( mtype:position etageUtilisateur; mtype:sensDepl sens) {
 
 		//on appelle l'ascenseur si ne n'est deja fait
 		::!(chAppelAscenseur??[etageUtilisateur, sens]) -> chAppelAscenseur!etageUtilisateur, sens; 
-													   printf("utilisateur %d appelle %e %e", _pid, etageUtilisateur, sens);
+													   printf("utilisateur %d appelle %e %e \n", _pid, etageUtilisateur, sens);
 	od
 
-	entrerDansAsc: chDetectionEntree!UTILISATEUR_INTERIEUR_ASCENSEUR;
-					printf("utilisateur %d entre %e %e", _pid, etageUtilisateur, sens);
+	entrerDansAsc: //chDetectionEntree!SIGNAL_UTIL_DANS_ASC;
+					printf("utilisateur %d entre %e %e \n", _pid, etageUtilisateur, sens);
 	
 };
 
@@ -143,4 +143,5 @@ Initialisations
 
 init{
 	run Utilisateur(etage0, monter);
+	run Utilisateur(etage9, descendre);
 }
