@@ -6,9 +6,8 @@ PROGRAMME PROMELA : SYSTEME DE CONTROLE D UN ASCENSUR
 Les constantes
 ----------------------------------------------------------------------------------------*/
 #define MAX 1000 //
-#define timerTpsAttenteMax 20
-#define appelAscMax  18 //Le nombre maximal d'appels simultanes a l'ascenseur 2*nbEtages - 2
-#define persMax 5 //nombre maximal de personnes dans l'ascenseur
+#define NB_ETAGES  10 //Le nombre d'etages
+#define NB_APPELS_MAX (NB_ETAGES - 1) //nombre max d'appels dans un sens de deplacement
 
 
 
@@ -25,11 +24,6 @@ Les varialbes
 mtype:sensDepl = { monter, descendre }; //sens de deplacement de l'ascenseur
 mtype:etatPorte = { ouverte, fermee }//etats possibles des portes de l'ascenseur
 
-typedef commandeAsc {
-	int etage;
-	mtype:sensDepl sens;
-};
-
 
 int etageCourantAsc = 0;
 mtype:etatPorte etatPorteAsc = fermee;
@@ -38,10 +32,31 @@ mtype:etatPorte etatPorteAsc = fermee;
 Les canaux
 ----------------------------------------------------------------------------------------*/
 
-chan chAppelAscenseur = [appelAscMax] of { commandeAsc, bool } ;
-chan chCommandeAsc = [1] of { commandeAsc } ;
+chan chMonter = [NB_APPELS_MAX] of { byte };
+chan chCommandeAsc = [1] of { byte };
 
 
+inline enleverMonteeMultiples(etage) {
+	byte etageAvant;
+	debut:
+	chMonter?<etageAvant>;
+	do
+		::(etage == etageAvant) -> chMonter?_; atomic {printf("chMonter multiple [%d] efface\n",etage);printCh(chMonter);}; goto debut
+		::else -> break 								
+	od
+}
+
+inline printCh(channel){
+	int tmp = 0;
+	byte msg;
+	do
+		:: tmp < len(channel) ->
+			channel?msg; channel!msg;		/* rotate in place */
+			printf("[%d]\n", msg);
+			tmp++
+		:: else -> break
+	od			
+}
 /*----------------------------------------------------------------------------------------
 Les processus
 ----------------------------------------------------------------------------------------*/
@@ -51,22 +66,12 @@ Les processus
 
 active proctype Controleur() {
     
-	commandeAsc cmdAsc;
+	byte cmdAsc;
 	
-	 //copier le message a partir du canal chAppelAscenseur
-	 //envoyer l'ordre a l'ascenseur
-	 //recevoir la confirmation d'arrivee de l'ascenseur
-	 //effacer le message traite correspondant du canal
+	do	
+		:: chMonter?cmdAsc -> atomic {enleverMonteeMultiples(cmdAsc); chCommandeAsc!cmdAsc}
 
-	do	//traitement des appels a l'ascenseur (de l'exterieur)
-
-		:: empty(chCommandeAsc) -> chAppelAscenseur?cmdAsc, true; 
-									chCommandeAsc!cmdAsc
-
-		:: nempty(chCommandeAsc) -> //attendre la confirmation que l'ascenseur a fini	 
-									do
-										:: (cmdAsc.etage == etageCourantAsc) && (etatPorteAsc == ouverte) -> break
-									od
+		//:: (cmdAsc.etage == etageCourantAsc) && (etatPorteAsc == ouverte) -> goto envoyerCmdAsc
 	od
 }
 
@@ -74,38 +79,6 @@ active proctype Controleur() {
 /* ----------------------------
   AppuisMultiples
 ---------------------------- */
-proctype AppuisMultiples() priority 100{
-
-	commandeAsc cmdNonVerif, cmdTemp;
-	bool verifie = false;
-	int _tmp_;
-
-debut: 	
-	//verification des commandes multiples	chAppelAscenseur
-	do
-		::chAppelAscenseur??cmdNonVerif, false -> //extraction du 1er message non verifie
-
-		//parcourrir le canal pour comparer
-		_tmp_ = 0;
-		do
-		:: _tmp_ < len(chAppelAscenseur) ->
-			chAppelAscenseur?cmdTemp, verifie; /* rotate in place */
-			chAppelAscenseur!cmdTemp, verifie;	
-
-			verifie && (cmdTemp.etage ==  cmdNonVerif.etage) && (cmdTemp.sens ==  cmdNonVerif.sens) -> goto debut
-			/* from the user code in the for body */
-	
-			/* from the user code in the for body */
-			_tmp_++
-
-		::_tmp_ == len(chAppelAscenseur) -> chAppelAscenseur!cmdNonVerif, true;
-
-		:: else ->  goto debut
-		od
-		
-
-	od
-};
 
 
 /* ----------------------------
@@ -114,13 +87,12 @@ debut:
 
 active proctype Ascenseur() {
 
-	commandeAsc cmd;
+	byte cmd;
 
 	do
-		::chCommandeAsc?cmd ->
-			printf("Ascenseur arrive a Etage %d \n", cmd.etage);
-		 	etageCourantAsc = cmd.etage ; etatPorteAsc = ouverte;
-		 
+		::chCommandeAsc?cmd -> 
+			atomic {/*enleverMonteeMultiples(cmd);*/printf("Ascenseur arrive a Etage %d \n", cmd);printCh(chMonter);
+		 	etageCourantAsc = cmd ; etatPorteAsc = ouverte;	} 
 	od
 
 };
@@ -129,25 +101,18 @@ active proctype Ascenseur() {
   Utilisateur
 ---------------------------- */
 
-proctype Utilisateur(int etageUtilisateur; mtype:sensDepl sens) {
-	
-	commandeAsc cmdAsc;
-	cmdAsc.etage = etageUtilisateur;
-	cmdAsc.sens = sens;
-	
-	//l'utilisateur appelle l'ascenseur
-	chAppelAscenseur!cmdAsc, false ; printf("utilisateur %d appelle asc: (Etage %d, %e)\n", _pid,cmdAsc.etage,sens);
-														
-	do //attente de l'ascenseur
-		::(etageUtilisateur == etageCourantAsc) && (etatPorteAsc == ouverte) -> 
-			atomic { 
-				//printf("Ascenseur arrive a Etage %d \n", etageUtilisateur);
-				printf("utilisateur %d entre asc: (Etage %d, %e)\n", _pid,cmdAsc.etage,sens)  ; break //entrer dans l'ascenseur
-			}
-	od
+proctype Utilisateur(byte etage; mtype:sensDepl sens) {
 
-		//entrerDansAsc: //chDetectionEntree!SIGNAL_UTIL_DANS_ASC;
-						
+	if//appel de l'ascenseur
+		::(sens == monter) -> atomic {chMonter!!etage; 
+									 printf("utilisateur %d appelle asc: (Etage %d, %e)\n", _pid,etage,sens)}
+		::else //(sens == descendre) -> chDescendre!etageUtilisateur
+	fi
+													
+	do //attente de l'ascenseur
+		::(etage == etageCourantAsc) && (etatPorteAsc == ouverte) -> 
+			printf("utilisateur %d entre asc: (Etage %d, %e)\n", _pid,etage,sens)  ; break //entrer dans l'ascenseur
+	od					
 };
 
 
@@ -156,11 +121,13 @@ Initialisations
 ----------------------------------------------------------------------------------------*/
 
 init{
-	atomic{
+	run Utilisateur(3, monter);
+	run Utilisateur(10, monter);
+	run Utilisateur(3, monter);
 	run Utilisateur(0, monter);
+	run Utilisateur(3, monter);
 	run Utilisateur(0, monter);
+	run Utilisateur(18, monter);
 	run Utilisateur(0, monter);
-	run Utilisateur(0, monter);
-	run AppuisMultiples()
-	}
+	run Utilisateur(3, monter);
 }
