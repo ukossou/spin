@@ -1,0 +1,145 @@
+# 1 "utilisateur_ascenseur.pml"
+# 1 "<built-in>"
+# 1 "<command-line>"
+# 1 "utilisateur_ascenseur.pml"
+
+
+
+
+
+
+mtype:DIRECTION_ASC = {MONTER,DESCENDRE};
+mtype:PORTES = {OUVERTES,FERMEES,OUVRIR,FERMER};
+
+
+
+typedef chEtage {
+ chan canal = [1] of {mtype:DIRECTION_ASC};
+}
+
+chEtage ChEtages_MONTER[10];
+chEtage ChEtages_DESCENDRE[10];
+
+chan chCmdAscenseur = [1] of {mtype:DIRECTION_ASC, int} ;
+chan chDeplacerAsc = [1] of {mtype:DIRECTION_ASC, int};
+chan chPortes = [1] of {mtype:PORTES};
+
+int etageAscCourant = 0;
+mtype:DIRECTION_ASC sensAscCourant = MONTER;
+
+active proctype Controleur() {
+ int nb, max_descente, min_montee = 10 -1;
+ int etagePasse;
+ do
+ ::else
+  max_descente = 0; min_montee = 10 -1;
+  montees:
+  for(nb : 0 .. (10 -1)){
+   if
+   ::ChEtages_MONTER[nb].canal?[MONTER] -> if
+             ::(nb >= etageAscCourant) -> chCmdAscenseur!MONTER(nb);
+             ::else if
+                 ::nb < min_montee -> min_montee = nb
+                 ::else
+                 fi
+             fi
+   ::else
+   fi
+  }
+  descentes:
+  for(nb : 0 .. (10 -1)){
+   if
+   ::ChEtages_DESCENDRE[10 - (nb+1)].canal?[DESCENDRE] ->
+               if
+               ::(10 - (nb+1) <= etageAscCourant) -> chCmdAscenseur!DESCENDRE(10 - (nb+1));
+               ::else if
+                   ::10 - (nb+1) > max_descente -> max_descente = 10 - (nb+1)
+                   ::else
+                   fi
+               fi
+   ::else
+   fi
+  }
+
+
+  if
+  ::(etageAscCourant > min_montee) -> chDeplacerAsc!DESCENDRE(min_montee);
+  ::(etageAscCourant < max_descente) -> chDeplacerAsc!MONTER(max_descente);
+  ::else
+  fi
+
+ od
+};
+
+active proctype Ascenseur() {
+ mtype:DIRECTION_ASC sensAsc;
+ int etageCmd;
+debut:
+ do
+ ::chCmdAscenseur?<sensAsc, etageCmd> ->
+   printf("commande etage%d %e\n", etageCmd, sensAsc);
+ arriveeEtage:
+   if
+   ::(etageCmd == etageAscCourant) -> chCmdAscenseur?sensAsc, etageCmd;
+              if
+              :: (sensAsc == MONTER) -> ChEtages_MONTER[etageCmd].canal?sensAsc ;
+              :: (sensAsc == DESCENDRE ) -> ChEtages_DESCENDRE[etageCmd].canal?sensAsc ;
+              fi
+              printf("ouverture des portes etage%d\n", etageCmd);
+
+   ::(etageCmd != etageAscCourant) -> printf("deplacement de etage%d vers etage%d\n", etageAscCourant, etageCmd);
+              if
+              ::(sensAsc == MONTER) -> etageAscCourant ++;
+              ::(sensAsc == DESCENDRE) -> etageAscCourant --;
+              fi
+              goto arriveeEtage;
+   fi
+
+ ::chDeplacerAsc?sensAsc, etageCmd -> printf("deplacement sepecial de etage%d vers etage%d\n", etageAscCourant, etageCmd);
+           etageAscCourant = etageCmd; goto debut
+ od
+};
+
+active proctype Portes(){
+ Fermees: chPortes?OUVRIR; printf("Les portes s'ouvrent ...\n"); chPortes!OUVERTES;
+ Ouvertes: chPortes?FERMER; printf("Les portes se ferment ...\n"); chPortes!FERMEES; goto Fermees;
+}
+
+proctype Utilisateur(int etage; mtype:DIRECTION_ASC sens) {
+
+ if
+ ::(sens == MONTER) -> if
+        ::ChEtages_MONTER[etage].canal!MONTER -> skip
+        ::ChEtages_MONTER[etage].canal?[MONTER] -> goto attenteAsc;
+        fi
+
+ ::(sens == DESCENDRE) -> if
+          ::ChEtages_DESCENDRE[etage].canal!DESCENDRE -> skip
+          ::ChEtages_DESCENDRE[etage].canal?[DESCENDRE] -> goto attenteAsc;
+          fi
+
+ fi
+
+ attenteAsc:
+};
+
+
+init{
+  run Utilisateur(1, MONTER);
+  run Utilisateur(5, MONTER);
+  run Utilisateur(7, DESCENDRE);
+  run Utilisateur(3, DESCENDRE);
+  run Utilisateur(6, MONTER);
+
+  run Utilisateur(9, DESCENDRE);
+
+  run Utilisateur(0, MONTER);
+  run Utilisateur(7, MONTER);
+
+
+
+
+
+
+
+};
